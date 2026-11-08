@@ -54,9 +54,8 @@ class CadNavigatorApp {
   }
 
   initCadViewer() {
-    this.cadViewer = new CadCanvasViewer('cad-viewer-container', {
-      onSelectPointForMap: (vertex) => this.handoffCadPointToMap(vertex)
-    });
+    // Original unmodified CAD Viewer runs inside #cad-viewer-iframe (./cadviewer/index.html)
+    this.cadViewer = null;
   }
 
   initNavigator() {
@@ -393,6 +392,9 @@ class CadNavigatorApp {
     const mapFab = document.getElementById('right-fab-toolbar');
     const cadFab = document.getElementById('cad-fab-toolbar');
     const cadBottom = document.getElementById('cad-bottom-info');
+    const topInfoPill = document.getElementById('top-info-pill');
+    const topRightActions = document.getElementById('top-right-actions');
+    const navHud = document.getElementById('navigation-hud');
 
     const tabMap = document.getElementById('tab-mode-map');
     const tabCad = document.getElementById('tab-mode-cad');
@@ -402,17 +404,16 @@ class CadNavigatorApp {
       cadEl.classList.remove('hidden');
 
       mapFab.classList.add('hidden');
-      cadFab.classList.remove('hidden');
-      cadBottom.classList.remove('hidden');
+      cadFab.classList.add('hidden');
+      cadBottom.classList.add('hidden');
+      if (topInfoPill) topInfoPill.classList.add('invisible', 'pointer-events-none');
+      if (topRightActions) topRightActions.classList.add('invisible', 'pointer-events-none');
+      if (navHud) navHud.classList.add('hidden');
 
       tabMap.classList.remove('active-mode-tab');
       tabMap.classList.add('text-slate-300');
       tabCad.classList.add('active-mode-tab');
       tabCad.classList.remove('text-slate-300');
-
-      this.cadViewer.initCanvasSize();
-      this.cadViewer.setDrawings(this.drawings);
-      this.showStatusToast('📐 순수 CAD 뷰어 모드 (치수/도면 검토)');
     } else {
       cadEl.classList.add('hidden');
       mapEl.classList.remove('hidden');
@@ -420,6 +421,11 @@ class CadNavigatorApp {
       cadFab.classList.add('hidden');
       cadBottom.classList.add('hidden');
       mapFab.classList.remove('hidden');
+      if (topInfoPill) topInfoPill.classList.remove('invisible', 'pointer-events-none');
+      if (topRightActions) topRightActions.classList.remove('invisible', 'pointer-events-none');
+      if (navHud && this.navigator && this.navigator.targetWaypoint) {
+        navHud.classList.remove('hidden');
+      }
 
       tabCad.classList.remove('active-mode-tab');
       tabCad.classList.add('text-slate-300');

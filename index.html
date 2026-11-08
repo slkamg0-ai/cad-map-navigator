@@ -30,8 +30,10 @@
   <!-- 1. Fullscreen Map Container (Mode: MAP) -->
   <div id="map"></div>
 
-  <!-- 2. Pure 2D Canvas CAD Viewer Container (Mode: CAD) -->
-  <div id="cad-viewer-container" class="hidden absolute inset-0 w-full h-full z-[2] overflow-hidden"></div>
+  <!-- 2. Original Unmodified CAD Viewer Container (Mode: CAD) -->
+  <div id="cad-viewer-container" class="hidden fixed inset-0 w-full h-full z-[500] overflow-hidden bg-[#14171c]">
+    <iframe id="cad-viewer-iframe" src="./cadviewer/index.html" class="w-full h-full border-0 block" title="CAD 뷰어"></iframe>
+  </div>
 
   <!-- Hidden File Input for DXF and DWG -->
   <input type="file" id="dxf-file-input" accept=".dxf,.dwg" class="hidden">
@@ -39,9 +41,9 @@
   <!-- ======================================================== -->
   <!-- Floating Top Bar (Dual-Mode Switcher & Status)           -->
   <!-- ======================================================== -->
-  <div class="fixed top-2.5 inset-x-2.5 z-[990] flex items-center justify-between pointer-events-none ui-autohide">
+  <div class="fixed top-2 inset-x-2.5 z-[990] flex items-center justify-between pointer-events-none ui-autohide">
     
-    <!-- Top Left: App Title & Status Badge -->
+    <!-- Top Left: App Title & Status Badge (Map Mode Only) -->
     <div id="top-info-pill" class="pointer-events-auto glass-pill px-2.5 py-1.5 rounded-full shadow-lg flex items-center gap-1.5 cursor-pointer transition active:scale-95" title="설정 메뉴 열기">
       <span class="w-2.5 h-2.5 rounded-full bg-blue-500 shadow-[0_0_8px_#3b82f6]"></span>
       <span class="text-xs font-bold text-white tracking-tight hidden sm:inline">CAD Nav</span>
@@ -51,7 +53,7 @@
     </div>
 
     <!-- Top Center: Dual-Mode Toggle Tabs (CAD Viewer vs Field Map) -->
-    <div class="pointer-events-auto glass-pill p-0.5 rounded-full shadow-xl flex items-center text-xs border border-blue-500/30">
+    <div id="mode-switcher-pill" class="pointer-events-auto glass-pill p-0.5 rounded-full shadow-xl flex items-center text-xs border border-blue-500/30 mx-auto">
       <button id="tab-mode-map" class="active-mode-tab px-3 py-1 rounded-full font-bold text-white transition flex items-center gap-1">
         <span>🛰️</span> <span>현장 지도</span>
       </button>
@@ -60,8 +62,8 @@
       </button>
     </div>
 
-    <!-- Top Right Action Buttons (Settings & UI Toggle) -->
-    <div class="pointer-events-auto flex items-center gap-2">
+    <!-- Top Right Action Buttons (Map Mode Only: Settings & UI Toggle) -->
+    <div id="top-right-actions" class="pointer-events-auto flex items-center gap-2">
       <!-- Fullscreen / Hide UI Toggle Button -->
       <button id="btn-toggle-ui" class="fab-btn glass-pill text-slate-200 hover:text-white" title="지도 전체화면 (UI 숨김/표시)">
         <span id="icon-ui-toggle" class="text-lg">👁️</span>

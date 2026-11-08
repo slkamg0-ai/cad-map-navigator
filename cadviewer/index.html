@@ -1,0 +1,221 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
+<meta name="theme-color" content="#14171c">
+
+<!-- 홈 화면에 추가했을 때 쓰는 아이콘/설정. manifest 는 안드로이드(Chrome),
+     apple-touch-icon 은 iOS(Safari) 가 각각 우선해서 읽는다 - 두 플랫폼 다
+     커버하려면 둘 다 있어야 한다. -->
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="icon" type="image/png" sizes="32x32" href="icons/icon-32.png">
+<link rel="icon" type="image/png" sizes="16x16" href="icons/icon-16.png">
+<link rel="apple-touch-icon" href="icons/icon-180.png">
+
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="CAD 뷰어">
+
+<title>CAD 뷰어</title>
+<link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+
+<svg class="defs" aria-hidden="true">
+  <symbol id="i-folder" viewBox="0 0 24 24"><path d="M3 7a2 2 0 012-2h4l2 2h8a2 2 0 012 2v8a2 2 0 01-2 2H5a2 2 0 01-2-2z"/></symbol>
+  <symbol id="i-hand" viewBox="0 0 24 24"><path d="M7 11V6.5a1.5 1.5 0 013 0V11m0-.5V5.5a1.5 1.5 0 013 0V11m0-.5v-1a1.5 1.5 0 013 0V15a6 6 0 01-6 6h-1a6 6 0 01-6-6v-3.5a1.5 1.5 0 013 0V13"/></symbol>
+  <symbol id="i-ruler" viewBox="0 0 24 24"><path d="M4 15L15 4l5 5L9 20z"/><path d="M8 11l2 2M11 8l2 2M14 5l2 2"/></symbol>
+  <symbol id="i-area" viewBox="0 0 24 24"><path d="M4 18L8 6l10 2 2 10z"/></symbol>
+  <symbol id="i-layers" viewBox="0 0 24 24"><path d="M12 3l9 5-9 5-9-5z"/><path d="M3 13l9 5 9-5"/></symbol>
+  <symbol id="i-eye" viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M2 12s3.5-6 10-6 10 6 10 6-3.5 6-10 6-10-6-10-6z"/></symbol>
+  <symbol id="i-fit" viewBox="0 0 24 24"><path d="M4 9V4h5M20 9V4h-5M4 15v5h5M20 15v5h-5"/></symbol>
+  <symbol id="i-close" viewBox="0 0 24 24"><path d="M6 6l12 12M18 6L6 18"/></symbol>
+  <symbol id="i-undo" viewBox="0 0 24 24"><path d="M9 14L4 9l5-5"/><path d="M4 9h11a5 5 0 010 10h-4"/></symbol>
+  <symbol id="i-check" viewBox="0 0 24 24"><path d="M4 12l5 5L20 6"/></symbol>
+  <symbol id="i-plus" viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></symbol>
+</svg>
+
+<canvas id="mapCanvas"></canvas>
+<canvas id="cv"></canvas>
+
+<!-- 상단 바 -->
+<header class="topbar">
+  <button class="tb-btn" id="btnOpen" aria-label="파일 열기">
+    <svg><use href="#i-folder"/></svg><span>열기</span>
+  </button>
+  <div class="title" id="title">도면 없음</div>
+  <button class="tb-btn ghost" id="btnInfo" aria-label="도면 정보">ⓘ</button>
+  <input type="file" id="fileInput" accept=".dxf,.dwg,application/dxf" hidden>
+</header>
+
+<!-- 조준용 십자선. 좌표 확인이 상시 기능이라 항상 떠 있고, 측정 중에만 진해진다 -->
+<div class="crosshair" id="crosshair" hidden>
+  <svg viewBox="0 0 64 64">
+    <circle cx="32" cy="32" r="13" />
+    <path d="M32 4v14M32 46v14M4 32h14M46 32h14"/>
+  </svg>
+  <div class="snap-tag" id="snapTag" hidden></div>
+</div>
+
+<!-- 화면 아래 쌓임: 토스트 / 떠 있는 버튼 / 측정값 / 조작 바 / 좌표 / 툴 독 -->
+<div class="bottom">
+  <div class="toast" id="toast" hidden></div>
+
+  <div class="floatrow">
+    <button class="pill" id="btnResults" hidden>측정 <em>0</em></button>
+    <button class="fab" id="btnFit" aria-label="전체 보기"><svg><use href="#i-fit"/></svg></button>
+  </div>
+
+  <div class="readout" id="readout" hidden></div>
+
+  <div class="actionbar" id="actionbar" hidden>
+    <button class="ab-btn" id="btnUndoPt" aria-label="한 점 취소"><svg><use href="#i-undo"/></svg></button>
+    <button class="ab-main" id="btnAddPt"><svg><use href="#i-plus"/></svg>점 추가</button>
+    <button class="ab-btn done" id="btnDone" aria-label="완료"><svg><use href="#i-check"/></svg></button>
+  </div>
+
+  <button class="coordbar" id="coordbar" hidden>
+    <span class="src" id="coordSrc">화면 중앙</span>
+    <span class="xy"><i>X</i><b id="coordX">—</b></span>
+    <span class="xy"><i>Y</i><b id="coordY">—</b></span>
+    <span class="cp" id="coordCopy">복사</span>
+  </button>
+
+  <nav class="dock" id="dock">
+    <button class="dk active" data-tool="none"><svg><use href="#i-hand"/></svg><span>이동</span></button>
+    <button class="dk" data-tool="dist"><svg><use href="#i-ruler"/></svg><span>거리</span></button>
+    <button class="dk" data-tool="area"><svg><use href="#i-area"/></svg><span>면적</span></button>
+    <button class="dk" data-sheet="sheetLayers"><svg><use href="#i-layers"/></svg><span>레이어</span></button>
+    <button class="dk" data-sheet="sheetView"><svg><use href="#i-eye"/></svg><span>보기</span></button>
+  </nav>
+</div>
+
+<!-- 시작 화면 -->
+<div class="splash" id="splash">
+  <div class="splash-card">
+    <div class="splash-mark">
+      <svg viewBox="0 0 24 24"><path d="M4 20V4l16 16z" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linejoin="round"/></svg>
+    </div>
+    <h1>CAD 뷰어</h1>
+    <p>도면을 열어 확대해 보고<br>거리와 면적을 잽니다</p>
+    <button class="big-btn" id="btnOpen2"><svg><use href="#i-folder"/></svg>도면 열기</button>
+    <button class="text-btn" id="btnSample">샘플 도면 먼저 보기</button>
+    <p class="fine">DXF는 바로 열리고, DWG는 서버에서 변환한 뒤 표시합니다.</p>
+  </div>
+</div>
+
+<!-- 레이어 시트 -->
+<div class="sheet" id="sheetLayers" hidden>
+  <div class="sheet-back" data-close></div>
+  <section class="sheet-body">
+    <div class="grip"></div>
+    <header>
+      <h2>레이어 <em id="layerCount">0</em></h2>
+      <button class="icon-btn" data-close><svg><use href="#i-close"/></svg></button>
+    </header>
+    <div class="sheet-tools">
+      <input type="search" id="layerFilter" placeholder="레이어 이름 검색">
+      <button class="chip" id="btnAllOn">전체 ON</button>
+      <button class="chip" id="btnAllOff">전체 OFF</button>
+    </div>
+    <div class="sheet-scroll" id="layerList"></div>
+  </section>
+</div>
+
+<!-- 보기 설정 시트 -->
+<div class="sheet" id="sheetView" hidden>
+  <div class="sheet-back" data-close></div>
+  <section class="sheet-body">
+    <div class="grip"></div>
+    <header>
+      <h2>보기 설정</h2>
+      <button class="icon-btn" data-close><svg><use href="#i-close"/></svg></button>
+    </header>
+    <div class="sheet-scroll">
+      <label class="row-toggle"><span>문자 표시</span><input type="checkbox" id="chkText" checked></label>
+      <label class="row-toggle"><span>해치 채움</span><input type="checkbox" id="chkFill" checked></label>
+      <label class="row-toggle"><span>선가중치</span><input type="checkbox" id="chkLw"></label>
+      <label class="row-toggle"><span>어두운 배경</span><input type="checkbox" id="chkDark" checked></label>
+      <label class="row-toggle"><span>객체 스냅</span><input type="checkbox" id="chkSnap" checked></label>
+      <div class="row-select">
+        <span>도면 단위</span>
+        <select id="selUnit">
+          <option value="m|1">m (미터)</option>
+          <option value="mm|1">mm (밀리미터)</option>
+          <option value="cm|1">cm (센티미터)</option>
+          <option value="m|0.001">도면 mm → m 표시</option>
+          <option value="ft|1">ft (피트)</option>
+        </select>
+      </div>
+
+      <div class="sub-head">배경지도</div>
+      <label class="row-toggle"><span>지도 배경 표시</span><input type="checkbox" id="chkBasemap"></label>
+      <div class="row-select" id="mapLayerRow" hidden>
+        <span>지도 종류</span>
+        <select id="selMapLayer">
+          <option value="base">일반지도</option>
+          <option value="satellite">위성</option>
+          <option value="hybrid">하이브리드</option>
+        </select>
+      </div>
+      <div class="row-select" id="mapCrsRow" hidden>
+        <span>도면 좌표계</span>
+        <select id="selMapCrs"></select>
+      </div>
+      <p class="hint" id="mapHint" hidden></p>
+    </div>
+  </section>
+</div>
+
+<!-- 측정 결과 시트 -->
+<div class="sheet" id="sheetMeasure" hidden>
+  <div class="sheet-back" data-close></div>
+  <section class="sheet-body">
+    <div class="grip"></div>
+    <header>
+      <h2>측정 결과</h2>
+      <button class="chip danger" id="btnClearMeasure">모두 지우기</button>
+      <button class="icon-btn" data-close><svg><use href="#i-close"/></svg></button>
+    </header>
+    <div class="sheet-scroll" id="measureList"></div>
+  </section>
+</div>
+
+<!-- 도면 정보 시트 -->
+<div class="sheet" id="sheetInfo" hidden>
+  <div class="sheet-back" data-close></div>
+  <section class="sheet-body">
+    <div class="grip"></div>
+    <header>
+      <h2>도면 정보</h2>
+      <button class="icon-btn" data-close><svg><use href="#i-close"/></svg></button>
+    </header>
+    <div class="sheet-scroll">
+      <dl class="info">
+        <dt>파일</dt><dd id="iFile">—</dd>
+        <dt>요소</dt><dd id="iEnt">—</dd>
+        <dt>레이어</dt><dd id="iLayers">—</dd>
+        <dt>범위</dt><dd id="iExt">—</dd>
+        <dt id="iSkipLabel" hidden>미표시</dt><dd id="iSkip" hidden></dd>
+      </dl>
+    </div>
+  </section>
+</div>
+
+<div class="loading" id="loading" hidden>
+  <div class="spinner"></div>
+  <p id="loadingText">읽는 중…</p>
+</div>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/proj4js/2.15.0/proj4.js"></script>
+<script src="js/geo.js"></script>
+<script src="js/dxf-parser.js"></script>
+<script src="js/geometry.js"></script>
+<script src="js/renderer.js"></script>
+<script src="js/basemap.js"></script>
+<script src="js/measure.js"></script>
+<script src="js/app.js"></script>
+</body>
+</html>
