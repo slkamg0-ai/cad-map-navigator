@@ -270,4 +270,149 @@ export class DxfParser {
 
     return { point: pt, nextIndex: i };
   }
+
+  /**
+   * Parse binary AutoCAD DWG file using LibreDWG WebAssembly
+   * @param {ArrayBuffer} arrayBuffer
+   * @returns {Promise<Object>} { entities, layers, bounds, totalCount }
+   */
+  async parseDwg(arrayBuffer) {
+    if (!this.wasmModule) {
+      const mod = await import('../wasm/libredwg-web.js');
+      const factory = mod.default || mod;
+      this.wasmModule = await factory({ locateFile: (f) => `./wasm/${f}` });
+    }
+    const wasm = this.wasmModule;
+
+    this.layers = { '0': { name: '0', color: '#00ffff', visible: true } };
+    this.entities = [];
+    this.bounds = { minX: Infinity, minY: Infinity, maxX: -Infinity, maxY: -Infinity };
+
+    const fileName = 'tmp_input.dwg';
+    const uint8 = new Uint8Array(arrayBuffer);
+    let dataPtr = 0;
+
+    try {
+      wasm.FS.writeFile(fileName, uint8);
+      const result = wasm.dwg_read_file(fileName);
+      if (!result || !result.data) {
+        throw new Error('DWG 데이터를 읽을 수 없습니다.');
+      }
+      dataPtr = result.data;
+
+      const modelSpace = wasm.dwg_model_space_object(dataPtr);
+      let next = wasm.get_first_owned_entity(modelSpace);
+
+      const DWG_TYPE_LINE = 19;
+      const DWG_TYPE_POINT = 27;
+      const DWG_TYPE_POLYLINE_2D = 15;
+      const DWG_TYPE_POLYLINE_3D = 16;
+      const DWG_TYPE_LWPOLYLINE = 77;
+      const DWG_TYPE_CIRCLE = 18;
+
+      while (next) {
+        const objPtr = next;
+        next = wasm.get_next_owned_entity(modelSpace, objPtr);
+
+        const fixedtype = wasm.dwg_object_get_fixedtype(objPtr);
+        const entityTio = wasm.dwg_object_to_entity_tio(objPtr);
+        if (!entityTio) continue;
+
+        if (fixedtype === DWG_TYPE_LINE) {
+          const start = wasm.dwg_dynapi_entity_value(entityTio, 'start')?.data;
+          const end = wasm.dwg_dynapi_entity_value(entityTio, 'end')?.data;
+          if (start && end) {
+            this.updateBounds(start.x, start.y);
+            this.updateBounds(end.x, end.y);
+            this.entities.push({
+              type: 'LINE',
+              layer: '0',
+              color: '#00ff88',
+              x1: start.x,
+              y1: start.y,
+              x2: end.x,
+              y2: end.y
+            });
+          }
+        } else if (fixedtype === DWG_TYPE_POINT) {
+          const x = wasm.dwg_dynapi_entity_value(entityTio, 'x')?.data;
+          const y = wasm.dwg_dynapi_entity_value(entityTio, 'y')?.data;
+          if (typeof x === 'number' && typeof y === 'number') {
+            this.updateBounds(x, y);
+            this.entities.push({
+              type: 'POINT',
+              layer: '0',
+              color: '#ffff00',
+              x,
+              y
+            });
+          }
+        } else if (fixedtype === DWG_TYPE_CIRCLE) {
+          const center = wasm.dwg_dynapi_entity_value(entityTio, 'center')?.data;
+          const radius = wasm.dwg_dynapi_entity_value(entityTio, 'radius')?.data;
+          if (center && typeof radius === 'number') {
+            this.updateBounds(center.x - radius, center.y - radius);
+            this.updateBounds(center.x + radius, center.y + radius);
+            this.entities.push({
+              type: 'CIRCLE',
+              layer: '0',
+              color: '#00ffff',
+              cx: center.x,
+              cy: center.y,
+              radius
+            });
+          }
+        } else if (fixedtype === DWG_TYPE_LWPOLYLINE) {
+          const numPoints = wasm.dwg_dynapi_entity_value(entityTio, 'num_points')?.data;
+          if (numPoints && numPoints >= 2) {
+            const ptsPtr = wasm.dwg_dynapi_entity_value(entityTio, 'points')?.data;
+            const pts = wasm.dwg_ptr_to_point2d_array(ptsPtr, numPoints);
+            if (pts && Array.isArray(pts)) {
+              const vertices = pts.map((pt) => {
+                this.updateBounds(pt.x, pt.y);
+                return { x: pt.x, y: pt.y };
+              });
+              this.entities.push({
+                type: 'LWPOLYLINE',
+                layer: '0',
+                color: '#00ccff',
+                closed: false,
+                vertices
+              });
+            }
+          }
+        } else if (fixedtype === DWG_TYPE_POLYLINE_2D || fixedtype === DWG_TYPE_POLYLINE_3D) {
+          const rawResult = fixedtype === DWG_TYPE_POLYLINE_2D
+            ? wasm.dwg_entity_polyline_2d_get_points(objPtr)
+            : wasm.dwg_entity_polyline_3d_get_points(objPtr);
+          const pts = rawResult?.data ?? rawResult;
+          if (pts && Array.isArray(pts) && pts.length >= 2) {
+            const vertices = pts.map((pt) => {
+              this.updateBounds(pt.x, pt.y);
+              return { x: pt.x, y: pt.y };
+            });
+            this.entities.push({
+              type: 'POLYLINE',
+              layer: '0',
+              color: '#00ccff',
+              closed: false,
+              vertices
+            });
+          }
+        }
+      }
+
+      return {
+        entities: this.entities,
+        layers: this.layers,
+        bounds: this.bounds,
+        totalCount: this.entities.length
+      };
+    } finally {
+      if (dataPtr) wasm.dwg_free(dataPtr);
+      if (wasm.FS.analyzePath(fileName, false).exists) {
+        wasm.FS.unlink(fileName);
+      }
+    }
+  }
 }

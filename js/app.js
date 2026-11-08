@@ -568,44 +568,49 @@ class CadNavigatorApp {
     this.mapMgr.updateUserLocation(this.navigator.currentPosition, 45);
   }
 
-  readDxfFile(file, mode = 'replace') {
-    const reader = new FileReader();
-    reader.onload = (e) => {
-      const text = e.target.result;
-      try {
-        const parsed = this.parser.parse(text);
-        const autoScale = this.transformer.autoDetectUnitScale(parsed.bounds);
-        document.getElementById('unit-scale-select').value = autoScale.toString();
-
-        const colorIdx = this.drawings.length % this.presetColors.length;
-        const newDrawing = {
-          id: 'dxf_' + Date.now() + '_' + Math.random().toString(36).substr(2, 4),
-          name: file.name,
-          entities: parsed.entities,
-          layers: parsed.layers,
-          bounds: parsed.bounds,
-          totalCount: parsed.totalCount,
-          visible: true,
-          color: this.presetColors[colorIdx],
-          unitScale: autoScale
-        };
-
-        if (mode === 'append') {
-          this.drawings.push(newDrawing);
-          this.showStatusToast(`➕ '${file.name}' 기존 도면 위에 중첩 추가됨 (총 ${this.drawings.length}개)`);
-        } else {
-          this.drawings = [newDrawing];
-          this.showStatusToast(`📁 '${file.name}' 도면 새로 열림 (객체 ${parsed.totalCount}개)`);
-        }
-
-        this.reprojectAndRender();
-        this.buildDrawingsList();
-        this.buildLayerList();
-      } catch (err) {
-        alert('DXF 파일 파싱 실패: ' + err.message);
+  async readDxfFile(file, mode = 'replace') {
+    const isDwg = file.name.toLowerCase().endsWith('.dwg');
+    try {
+      this.showStatusToast(`⏳ '${file.name}' 도면 파싱 중...`, 10000);
+      let parsed;
+      if (isDwg) {
+        const buffer = await file.arrayBuffer();
+        parsed = await this.parser.parseDwg(buffer);
+      } else {
+        const text = await file.text();
+        parsed = this.parser.parse(text);
       }
-    };
-    reader.readAsText(file);
+
+      const autoScale = this.transformer.autoDetectUnitScale(parsed.bounds);
+      document.getElementById('unit-scale-select').value = autoScale.toString();
+
+      const colorIdx = this.drawings.length % this.presetColors.length;
+      const newDrawing = {
+        id: 'cad_' + Date.now() + '_' + Math.random().toString(36).substr(2, 4),
+        name: file.name,
+        entities: parsed.entities,
+        layers: parsed.layers,
+        bounds: parsed.bounds,
+        totalCount: parsed.totalCount,
+        visible: true,
+        color: this.presetColors[colorIdx],
+        unitScale: autoScale
+      };
+
+      if (mode === 'append') {
+        this.drawings.push(newDrawing);
+        this.showStatusToast(`➕ '${file.name}' 기존 도면 위에 중첩 추가됨 (총 ${this.drawings.length}개)`);
+      } else {
+        this.drawings = [newDrawing];
+        this.showStatusToast(`📁 '${file.name}' 도면 새로 열림 (객체 ${parsed.totalCount}개)`);
+      }
+
+      this.reprojectAndRender();
+      this.buildDrawingsList();
+      this.buildLayerList();
+    } catch (err) {
+      alert('도면 파일 파싱 실패: ' + err.message);
+    }
   }
 
   reprojectAndRender() {
