@@ -1,0 +1,416 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+  <title>CAD Map Navigator - 캐드 뷰어 & 현장 지도 GPS 길찾기</title>
+  
+  <!-- PWA Meta Tags -->
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <meta name="theme-color" content="#0f172a">
+  <link rel="icon" type="image/x-icon" href="./favicon.ico">
+  <link rel="manifest" href="./manifest.json">
+
+  <!-- Tailwind CSS -->
+  <script src="https://cdn.tailwindcss.com"></script>
+
+  <!-- Leaflet CSS & JS -->
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+
+  <!-- Proj4js for Coordinate Transformations -->
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/proj4js/2.11.0/proj4.js"></script>
+
+  <!-- App Custom Styles -->
+  <link rel="stylesheet" href="./css/style.css">
+</head>
+<body class="bg-slate-900 text-slate-100 h-screen w-screen overflow-hidden select-none">
+
+  <!-- 1. Fullscreen Map Container (Mode: MAP) -->
+  <div id="map"></div>
+
+  <!-- 2. Pure 2D Canvas CAD Viewer Container (Mode: CAD) -->
+  <div id="cad-viewer-container" class="hidden absolute inset-0 w-full h-full z-[2] overflow-hidden"></div>
+
+  <!-- Hidden File Input for DXF -->
+  <input type="file" id="dxf-file-input" accept=".dxf" class="hidden">
+
+  <!-- ======================================================== -->
+  <!-- Floating Top Bar (Dual-Mode Switcher & Status)           -->
+  <!-- ======================================================== -->
+  <div class="fixed top-2.5 inset-x-2.5 z-[990] flex items-center justify-between pointer-events-none ui-autohide">
+    
+    <!-- Top Left: App Title & Status Badge -->
+    <div id="top-info-pill" class="pointer-events-auto glass-pill px-2.5 py-1.5 rounded-full shadow-lg flex items-center gap-1.5 cursor-pointer transition active:scale-95" title="설정 메뉴 열기">
+      <span class="w-2.5 h-2.5 rounded-full bg-blue-500 shadow-[0_0_8px_#3b82f6]"></span>
+      <span class="text-xs font-bold text-white tracking-tight hidden sm:inline">CAD Nav</span>
+      <span id="gps-status-badge" class="text-[10px] bg-slate-800/90 text-emerald-300 px-1.5 py-0.5 rounded-full border border-slate-700 flex items-center gap-1 font-mono">
+        <span class="w-1.5 h-1.5 rounded-full bg-emerald-400"></span>GPS
+      </span>
+    </div>
+
+    <!-- Top Center: Dual-Mode Toggle Tabs (CAD Viewer vs Field Map) -->
+    <div class="pointer-events-auto glass-pill p-0.5 rounded-full shadow-xl flex items-center text-xs border border-blue-500/30">
+      <button id="tab-mode-map" class="active-mode-tab px-3 py-1 rounded-full font-bold text-white transition flex items-center gap-1">
+        <span>🛰️</span> <span>현장 지도</span>
+      </button>
+      <button id="tab-mode-cad" class="px-3 py-1 rounded-full text-slate-300 hover:text-white transition flex items-center gap-1 font-medium">
+        <span>📐</span> <span>CAD 뷰어</span>
+      </button>
+    </div>
+
+    <!-- Top Right Action Buttons (Settings & UI Toggle) -->
+    <div class="pointer-events-auto flex items-center gap-2">
+      <!-- Fullscreen / Hide UI Toggle Button -->
+      <button id="btn-toggle-ui" class="fab-btn glass-pill text-slate-200 hover:text-white" title="지도 전체화면 (UI 숨김/표시)">
+        <span id="icon-ui-toggle" class="text-lg">👁️</span>
+      </button>
+
+      <!-- Main Settings & Drawer Toggle Button -->
+      <button id="btn-open-settings" class="fab-btn bg-blue-600 hover:bg-blue-500 text-white shadow-blue-500/30" title="통합 메뉴 및 설정">
+        <span class="text-lg">⚙️</span>
+      </button>
+    </div>
+  </div>
+
+  <!-- Auto-Fading Status Notification Pill (Top Center) -->
+  <div id="auto-status-toast" class="fixed top-12 left-1/2 -translate-x-1/2 z-[992] pointer-events-none transition-all duration-500 opacity-0 -translate-y-4">
+    <div class="glass-panel px-3.5 py-1.5 rounded-full shadow-2xl border border-blue-500/40 text-[11px] text-blue-200 font-medium flex items-center gap-2 whitespace-nowrap">
+      <span id="auto-status-text">🛰️ VWorld 위성 • 📐 EPSG:5186</span>
+    </div>
+  </div>
+
+  <!-- ======================================================== -->
+  <!-- Map Mode: Floating Right Toolbar                         -->
+  <!-- ======================================================== -->
+  <div id="right-fab-toolbar" class="fixed right-3 bottom-24 z-[990] flex flex-col gap-2.5 pointer-events-auto ui-autohide">
+    <button id="btn-toggle-gps" class="fab-btn bg-slate-800/90 hover:bg-slate-700 text-slate-300 border border-slate-700" title="내 GPS 실시간 추적">
+      <span class="text-lg">🛰️</span>
+    </button>
+    <button id="btn-center-user" class="fab-btn bg-slate-800/90 hover:bg-slate-700 text-slate-300 border border-slate-700" title="내 위치로 지도 이동">
+      <span class="text-lg">📍</span>
+    </button>
+    <button id="btn-center-cad" class="fab-btn bg-slate-800/90 hover:bg-slate-700 text-slate-300 border border-slate-700" title="도면 전체 보기">
+      <span class="text-lg">🗺️</span>
+    </button>
+    <button id="btn-sim-gps" class="fab-btn bg-slate-800/90 hover:bg-slate-700 text-slate-300 border border-slate-700" title="모의 GPS 테스트">
+      <span class="text-base">🎮</span>
+    </button>
+  </div>
+
+  <!-- ======================================================== -->
+  <!-- CAD Mode: Floating Right Toolbar & Live Coordinate Bar   -->
+  <!-- ======================================================== -->
+  <div id="cad-fab-toolbar" class="hidden fixed right-3 bottom-24 z-[990] flex flex-col gap-2.5 pointer-events-auto ui-autohide">
+    <!-- Zoom Extents -->
+    <button id="btn-cad-fit" class="fab-btn bg-slate-800/90 hover:bg-slate-700 text-slate-300 border border-slate-700" title="도면 전체 화면에 맞춤">
+      <span class="text-lg">🗺️</span>
+    </button>
+    <!-- Distance Measurement Tool -->
+    <button id="btn-cad-measure" class="fab-btn bg-slate-800/90 hover:bg-slate-700 text-slate-300 border border-slate-700" title="치수/거리 측정 (두 점 클릭)">
+      <span class="text-lg">📏</span>
+    </button>
+  </div>
+
+  <!-- CAD Mode: Bottom Live Coordinate Display -->
+  <div id="cad-bottom-info" class="hidden fixed bottom-4 left-3 z-[990] glass-pill px-3 py-1.5 rounded-full text-xs font-mono text-blue-300 border border-blue-500/30 flex items-center gap-2 pointer-events-auto">
+    <span class="text-slate-400">좌표:</span>
+    <span id="cad-coords-live">X: 0.00, Y: 0.00</span>
+  </div>
+
+  <!-- CAD Mode: Selected Vertex Inspection Card & "Find on Map" -->
+  <div id="cad-selection-card" class="hidden fixed bottom-14 left-3 right-3 sm:left-auto sm:right-3 sm:w-80 glass-panel p-3.5 rounded-2xl shadow-2xl border border-blue-500/50 z-[995] space-y-2 pointer-events-auto">
+    <div class="flex items-center justify-between border-b border-slate-700/80 pb-1.5">
+      <div class="flex items-center gap-1.5 truncate">
+        <span class="text-base">📍</span>
+        <span id="cad-sel-label" class="font-bold text-xs text-white truncate">[도면] 선 모서리</span>
+      </div>
+      <button id="btn-close-cad-sel" class="w-6 h-6 rounded-full bg-slate-800 text-slate-400 hover:text-white flex items-center justify-center text-xs">✕</button>
+    </div>
+    <p id="cad-sel-coords" class="text-[11px] font-mono text-blue-300">CAD: X=198030.00, Y=551840.00</p>
+    <button id="btn-cad-find-on-map" class="w-full bg-blue-600 hover:bg-blue-500 text-white font-bold text-xs py-2.5 rounded-xl shadow flex items-center justify-center gap-1.5 active:scale-98 transition">
+      <span>🎯</span> 지도에서 이 위치 찾아가기 (현장 길안내)
+    </button>
+  </div>
+
+  <!-- ======================================================== -->
+  <!-- Map Mode: Navigation HUD (Collapsible Guidance Card)     -->
+  <!-- ======================================================== -->
+  <div id="navigation-hud" class="hidden fixed bottom-3 left-3 right-3 sm:left-auto sm:right-3 sm:w-96 z-[995] glass-panel rounded-2xl shadow-2xl border border-blue-500/40 pointer-events-auto overflow-hidden">
+    
+    <!-- Mini Collapsed View (Ultra-Compact: only 44px) -->
+    <div class="hud-collapsed-view px-3 py-2.5 items-center justify-between cursor-pointer">
+      <div class="flex items-center gap-2 truncate">
+        <span class="text-base">🎯</span>
+        <span id="mini-hud-name" class="text-xs font-bold text-white truncate max-w-[120px]">목표</span>
+        <span id="mini-hud-dist" class="text-sm font-black text-amber-300">0.0m</span>
+        <span id="mini-hud-bearing" class="text-xs text-slate-300 font-mono">↗</span>
+      </div>
+      <div class="flex items-center gap-1 shrink-0">
+        <button id="btn-expand-hud" class="px-2 py-1 bg-slate-800 text-slate-200 rounded text-[11px] font-medium border border-slate-700">펼치기 ▲</button>
+        <button id="btn-close-hud-mini" class="w-6 h-6 rounded bg-slate-800 text-slate-400 hover:text-white flex items-center justify-center text-xs">✕</button>
+      </div>
+    </div>
+
+    <!-- Full Expanded View -->
+    <div class="hud-expanded-view p-3.5 space-y-2.5">
+      <div class="flex items-center justify-between pb-2 border-b border-slate-700/60">
+        <div class="flex items-center space-x-2 truncate">
+          <span class="text-xl shrink-0">🎯</span>
+          <div class="truncate">
+            <h3 id="hud-target-name" class="text-xs font-bold text-white truncate">목표 지점</h3>
+            <p id="hud-cad-coords" class="text-[10px] text-blue-300 font-mono truncate">CAD: X=0.00, Y=0.00</p>
+          </div>
+        </div>
+        <div class="flex items-center space-x-1.5 shrink-0">
+          <span id="hud-arrival-badge" class="hidden"></span>
+          <button id="btn-collapse-hud" class="px-1.5 py-0.5 rounded bg-slate-800 text-slate-300 hover:text-white text-[10px] border border-slate-700">접기 ▼</button>
+          <button id="btn-close-hud" class="w-6 h-6 rounded-full bg-slate-800 text-slate-400 hover:text-white flex items-center justify-center text-xs">✕</button>
+        </div>
+      </div>
+
+      <div class="flex items-center justify-between pt-1">
+        <div>
+          <div class="text-[10px] text-slate-400 font-medium">남은 거리</div>
+          <div id="hud-distance" class="leading-none pt-0.5">
+            <span class="text-3xl font-black text-amber-300">0.0</span> <span class="text-sm text-gray-300">m</span>
+          </div>
+          <div class="text-[10px] text-slate-400 pt-1">
+            방향: <span id="hud-bearing" class="font-bold text-white">-</span>
+          </div>
+        </div>
+
+        <div class="flex flex-col items-center">
+          <div class="relative w-14 h-14 rounded-full bg-slate-800/80 border-2 border-amber-400/50 flex items-center justify-center shadow-inner">
+            <div id="hud-nav-arrow" class="transition-transform duration-200 ease-out text-2xl font-black text-amber-400 drop-shadow-[0_0_8px_rgba(251,191,36,0.8)]">
+              ⬆️
+            </div>
+            <div class="absolute top-0.5 text-[8px] font-bold text-slate-400">N</div>
+          </div>
+          <span class="text-[8px] text-slate-400 pt-0.5">화살표 방향으로 이동</span>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ======================================================== -->
+  <!-- Integrated Settings & Control Drawer                     -->
+  <!-- ======================================================== -->
+  <div id="settings-drawer-backdrop" class="hidden fixed inset-0 bg-black/60 backdrop-blur-xs z-[1050] transition-opacity">
+    <div id="settings-drawer" class="fixed inset-y-0 right-0 w-full sm:w-96 glass-panel shadow-2xl flex flex-col p-4 border-l border-slate-700/60 overflow-y-auto">
+      
+      <!-- Drawer Header -->
+      <div class="flex items-center justify-between pb-3 border-b border-slate-700/80">
+        <h2 class="font-bold text-sm text-white flex items-center gap-2">
+          <span>⚙️</span> 메뉴 및 도면 설정
+        </h2>
+        <button id="btn-close-settings" class="w-8 h-8 rounded-full bg-slate-800 text-slate-400 hover:text-white flex items-center justify-center text-sm">✕</button>
+      </div>
+
+      <div class="space-y-4 pt-3 text-xs">
+        
+        <!-- Section 1: Multi-CAD Drawing Manager -->
+        <div class="bg-slate-800/80 p-3 rounded-xl border border-slate-700/70 space-y-2.5">
+          <div class="flex items-center justify-between">
+            <span class="font-bold text-slate-300">📁 캐드 도면 (다중 중첩 지원)</span>
+            <button id="btn-clear-all-drawings" class="text-[10px] text-red-400 hover:text-red-300">전체 삭제</button>
+          </div>
+          
+          <div class="grid grid-cols-2 gap-2">
+            <button id="btn-open-new-dxf" class="bg-blue-600 hover:bg-blue-500 text-white font-medium py-2 px-2.5 rounded-lg shadow flex items-center justify-center gap-1">
+              <span>📂</span> 새로 열기
+            </button>
+            <button id="btn-append-dxf" class="bg-emerald-600 hover:bg-emerald-500 text-white font-medium py-2 px-2.5 rounded-lg shadow flex items-center justify-center gap-1">
+              <span>➕</span> 추가로 엎기
+            </button>
+          </div>
+
+          <div class="flex items-center justify-between pt-0.5">
+            <span class="text-[11px] text-slate-400">테스트용:</span>
+            <button id="btn-sample-cad" class="bg-slate-700 hover:bg-slate-600 text-slate-200 text-[11px] font-medium py-1 px-2.5 rounded-lg border border-slate-600 flex items-center gap-1">
+              <span>🏛️</span> 샘플 도면 추가
+            </button>
+          </div>
+
+          <div class="pt-1 border-t border-slate-700/60 space-y-1.5">
+            <div class="text-[10px] text-slate-400 font-semibold flex items-center justify-between">
+              <span>불러온 도면 목록</span>
+              <span id="drawer-drawings-count" class="text-blue-400">0개</span>
+            </div>
+            <div id="drawings-list" class="space-y-1 max-h-36 overflow-y-auto pr-0.5">
+              <!-- Dynamically populated -->
+            </div>
+          </div>
+        </div>
+
+        <!-- Section 2: Coordinate Reference System (CRS) -->
+        <div class="bg-slate-800/80 p-3 rounded-xl border border-slate-700/70 space-y-2.5">
+          <div class="flex items-center justify-between">
+            <span class="font-bold text-slate-300">📐 지도 좌표계 (CRS)</span>
+            <button id="btn-open-calibration" class="text-blue-400 hover:text-blue-300 text-[11px] underline font-medium">2점 기준점 보정</button>
+          </div>
+          
+          <select id="crs-select" class="w-full bg-slate-900 border border-slate-700 text-white text-xs rounded-lg p-2 focus:ring-1 focus:ring-blue-500">
+            <!-- Populated dynamically -->
+          </select>
+
+          <div class="flex items-center justify-between pt-0.5">
+            <span class="text-slate-400">도면 단위:</span>
+            <select id="unit-scale-select" class="bg-slate-900 border border-slate-700 text-white text-xs rounded-lg px-2 py-1">
+              <option value="1.0">m (미터 단위 도면)</option>
+              <option value="0.001">mm (밀리미터 단위 도면)</option>
+            </select>
+          </div>
+        </div>
+
+        <!-- Section 3: Base Map Selection -->
+        <div class="bg-slate-800/80 p-3 rounded-xl border border-slate-700/70 space-y-2.5">
+          <span class="font-bold text-slate-300 block">🛰️ 배경 지도 선택 (지도 모드)</span>
+          <div class="grid grid-cols-2 gap-1.5">
+            <button data-map-base="vworld_sat" class="active-map-tab py-1.5 px-2 rounded-lg bg-slate-900 text-slate-300 text-center font-medium transition">VWorld 항공사진</button>
+            <button data-map-base="vworld_base" class="py-1.5 px-2 rounded-lg bg-slate-900 text-slate-300 text-center font-medium transition">VWorld 일반</button>
+            <button data-map-base="esri_sat" class="py-1.5 px-2 rounded-lg bg-slate-900 text-slate-300 text-center font-medium transition">Esri 위성</button>
+            <button data-map-base="osm" class="py-1.5 px-2 rounded-lg bg-slate-900 text-slate-300 text-center font-medium transition">OpenStreetMap</button>
+          </div>
+
+          <label class="flex items-center gap-2 pt-1 cursor-pointer">
+            <input type="checkbox" id="chk-hybrid" checked class="rounded text-blue-500 bg-slate-900 border-slate-700 focus:ring-0">
+            <span class="text-slate-300">지명 / 도로명 라벨 표시 (하이브리드)</span>
+          </label>
+        </div>
+
+        <!-- Section 4: CAD Visualization & Layer Style -->
+        <div class="bg-slate-800/80 p-3 rounded-xl border border-slate-700/70 space-y-2.5">
+          <span class="font-bold text-slate-300 block">🎨 도면 시각화 & 투명도</span>
+          
+          <div class="flex items-center justify-between">
+            <span class="text-slate-400">지도 위 투명도:</span>
+            <div class="flex items-center gap-2">
+              <input type="range" id="cad-opacity" min="0.1" max="1.0" step="0.05" value="0.9" class="w-28 accent-blue-500 cursor-pointer">
+              <span id="cad-opacity-val" class="font-mono text-slate-200 text-xs w-8 text-right">90%</span>
+            </div>
+          </div>
+
+          <div class="flex items-center justify-between pt-1">
+            <span class="text-slate-400">야외 시인성 모드:</span>
+            <button id="btn-color-mode" class="bg-slate-700 hover:bg-slate-600 text-slate-200 px-2.5 py-1 rounded-lg border border-slate-600 text-[11px] font-medium">
+              ✨ 형광 노랑
+            </button>
+          </div>
+        </div>
+
+        <!-- Section 5: Layer Management -->
+        <div class="bg-slate-800/80 p-3 rounded-xl border border-slate-700/70 space-y-2">
+          <span class="font-bold text-slate-300 block">📑 도면 레이어 On/Off</span>
+          <div id="layers-list" class="max-h-40 overflow-y-auto space-y-1 pr-1">
+            <!-- Populated dynamically -->
+          </div>
+        </div>
+
+        <!-- Section 6: Screen & Auto-Hide Behavior -->
+        <div class="bg-slate-800/80 p-3 rounded-xl border border-slate-700/70 space-y-2">
+          <span class="font-bold text-slate-300 block">👁️ 화면 자동 숨김 설정</span>
+          <label class="flex items-center justify-between cursor-pointer">
+            <span class="text-slate-400">4초 미조작 시 메뉴 자동 페이드</span>
+            <input type="checkbox" id="chk-auto-hide" checked class="rounded text-blue-500 bg-slate-900 border-slate-700 focus:ring-0">
+          </label>
+        </div>
+
+      </div>
+
+      <div class="pt-4 mt-auto">
+        <button id="btn-close-settings-bottom" class="w-full bg-slate-800 hover:bg-slate-700 text-white font-bold py-2.5 rounded-xl border border-slate-700 shadow">
+          닫기
+        </button>
+      </div>
+
+    </div>
+  </div>
+
+  <!-- ======================================================== -->
+  <!-- 2-Point Ground Control Calibration Modal                 -->
+  <!-- ======================================================== -->
+  <div id="calib-modal" class="hidden fixed inset-0 z-[1100] bg-black/70 backdrop-blur-sm flex items-center justify-center p-3 sm:p-4">
+    <div class="glass-panel w-full max-w-md max-h-[90vh] overflow-y-auto rounded-2xl p-4 sm:p-5 shadow-2xl border border-slate-600 space-y-3.5">
+      <div class="flex items-center justify-between border-b border-slate-700 pb-2">
+        <h3 class="font-bold text-xs sm:text-sm text-white flex items-center gap-1.5">
+          <span>🎯</span> 현장 상대좌표 2점 기준점 보정 (Helmert 2D)
+        </h3>
+        <button id="btn-close-calib" class="w-7 h-7 rounded-full bg-slate-800 text-slate-400 hover:text-white flex items-center justify-center text-xs">✕</button>
+      </div>
+
+      <p class="text-[11px] text-slate-300 leading-relaxed">
+        도면이 현장 임의(0, 0) 좌표로 작성된 경우, 도면 상 2개 기준점과 실제 지도의 2개 위치를 매칭하여 축척·회전·위치를 자동 보정합니다.
+      </p>
+
+      <div class="bg-slate-800/80 p-2.5 rounded-xl border border-slate-700 space-y-1.5 text-xs">
+        <span class="font-bold text-blue-400 text-[11px]">1번 기준점 (Point 1)</span>
+        <div class="grid grid-cols-2 gap-1.5">
+          <div>
+            <label class="text-[10px] text-slate-400">CAD X</label>
+            <input type="number" id="calib-cad-1-x" class="w-full bg-slate-900 border border-slate-700 rounded px-2 py-1 text-white text-xs" placeholder="0.0">
+          </div>
+          <div>
+            <label class="text-[10px] text-slate-400">CAD Y</label>
+            <input type="number" id="calib-cad-1-y" class="w-full bg-slate-900 border border-slate-700 rounded px-2 py-1 text-white text-xs" placeholder="0.0">
+          </div>
+          <div>
+            <label class="text-[10px] text-slate-400">지도 위도 (Lat)</label>
+            <input type="number" step="0.0000001" id="calib-geo-1-lat" class="w-full bg-slate-900 border border-slate-700 rounded px-2 py-1 text-white text-xs" placeholder="37.5665">
+          </div>
+          <div>
+            <label class="text-[10px] text-slate-400">지도 경도 (Lng)</label>
+            <input type="number" step="0.0000001" id="calib-geo-1-lng" class="w-full bg-slate-900 border border-slate-700 rounded px-2 py-1 text-white text-xs" placeholder="126.9780">
+          </div>
+        </div>
+      </div>
+
+      <div class="bg-slate-800/80 p-2.5 rounded-xl border border-slate-700 space-y-1.5 text-xs">
+        <span class="font-bold text-amber-400 text-[11px]">2번 기준점 (Point 2)</span>
+        <div class="grid grid-cols-2 gap-1.5">
+          <div>
+            <label class="text-[10px] text-slate-400">CAD X</label>
+            <input type="number" id="calib-cad-2-x" class="w-full bg-slate-900 border border-slate-700 rounded px-2 py-1 text-white text-xs" placeholder="100.0">
+          </div>
+          <div>
+            <label class="text-[10px] text-slate-400">CAD Y</label>
+            <input type="number" id="calib-cad-2-y" class="w-full bg-slate-900 border border-slate-700 rounded px-2 py-1 text-white text-xs" placeholder="100.0">
+          </div>
+          <div>
+            <label class="text-[10px] text-slate-400">지도 위도 (Lat)</label>
+            <input type="number" step="0.0000001" id="calib-geo-2-lat" class="w-full bg-slate-900 border border-slate-700 rounded px-2 py-1 text-white text-xs" placeholder="37.5670">
+          </div>
+          <div>
+            <label class="text-[10px] text-slate-400">지도 경도 (Lng)</label>
+            <input type="number" step="0.0000001" id="calib-geo-2-lng" class="w-full bg-slate-900 border border-slate-700 rounded px-2 py-1 text-white text-xs" placeholder="126.9790">
+          </div>
+        </div>
+      </div>
+
+      <div class="pt-1">
+        <button id="btn-apply-calib" class="w-full bg-blue-600 hover:bg-blue-500 text-white font-bold text-xs py-2.5 rounded-xl shadow">
+          보정 적용 및 지도 중첩하기
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Toast Notification Message -->
+  <div id="toast" class="opacity-0 pointer-events-none transition-opacity duration-300 fixed bottom-20 left-1/2 transform -translate-x-1/2 z-[1200] bg-slate-950/95 text-white border border-slate-700 px-4 py-2 rounded-full shadow-2xl text-xs font-medium backdrop-blur-md whitespace-nowrap">
+    알림 메시지
+  </div>
+
+  <!-- Main ES Module Bootloader -->
+  <script type="module" src="./js/app.js"></script>
+  <script>
+    if ('serviceWorker' in navigator) {
+      window.addEventListener('load', () => {
+        navigator.serviceWorker.register('./sw.js').catch((err) => {
+          console.log('SW registration skipped:', err);
+        });
+      });
+    }
+  </script>
+</body>
+</html>
